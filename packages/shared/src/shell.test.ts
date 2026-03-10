@@ -59,6 +59,26 @@ describe("readPathFromLoginShell", () => {
     expect(options).toEqual({ encoding: "utf8", timeout: 5000 });
   });
 
+  it("falls back to non-interactive login mode when interactive login fails", () => {
+    const execFile = vi.fn<
+      (
+        file: string,
+        args: ReadonlyArray<string>,
+        options: { encoding: "utf8"; timeout: number },
+      ) => string
+    >((_, args) => {
+      if (args[0] === "-ilc") {
+        throw new Error("interactive login unsupported");
+      }
+      return "__T3CODE_PATH_START__\n/a:/b\n__T3CODE_PATH_END__\n";
+    });
+
+    expect(readPathFromLoginShell("/bin/sh", execFile)).toBe("/a:/b");
+    expect(execFile).toHaveBeenCalledTimes(2);
+    expect(execFile.mock.calls[0]?.[1]?.[0]).toBe("-ilc");
+    expect(execFile.mock.calls[1]?.[1]?.[0]).toBe("-lc");
+  });
+
   describe("resolvePathFromLoginShells", () => {
     it("returns the first resolved PATH from the provided shells", () => {
       const execFile = vi.fn<

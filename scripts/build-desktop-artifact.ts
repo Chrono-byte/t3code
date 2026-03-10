@@ -123,6 +123,30 @@ function resolveGitCommitHash(repoRoot: string): string {
   return hash.toLowerCase();
 }
 
+function resolveGitTaggedVersion(repoRoot: string): string | undefined {
+  const result = spawnSync("git", ["tag", "--points-at", "HEAD"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    return undefined;
+  }
+
+  const tags = result.stdout
+    .split("\n")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+
+  for (const tag of tags) {
+    const match = tag.match(/^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return undefined;
+}
+
 function resolvePythonForNodeGyp(): string | undefined {
   const configured = process.env.npm_config_python ?? process.env.PYTHON;
   if (configured && existsSync(configured)) {
@@ -923,7 +947,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       }),
   });
 
-  const appVersion = options.version ?? serverPackageJson.version;
+  const taggedVersion = resolveGitTaggedVersion(repoRoot);
+  const appVersion = options.version ?? taggedVersion ?? serverPackageJson.version;
   const appImageReleaseDate = resolveAppImageReleaseDate();
   const commitHash = resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;

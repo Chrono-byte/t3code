@@ -14,6 +14,11 @@ type ExecFileSyncLike = (
   options: { encoding: "utf8"; timeout: number },
 ) => string;
 
+const LOGIN_SHELL_ARG_SETS = [
+  ["-ilc", PATH_CAPTURE_COMMAND],
+  ["-lc", PATH_CAPTURE_COMMAND],
+] as const;
+
 export function extractPathFromShellOutput(output: string): string | null {
   const startIndex = output.indexOf(PATH_CAPTURE_START);
   if (startIndex === -1) return null;
@@ -30,17 +35,34 @@ export function readPathFromLoginShell(
   shell: string,
   execFile: ExecFileSyncLike = execFileSync,
 ): string | undefined {
-  const output = execFile(shell, ["-ilc", PATH_CAPTURE_COMMAND], {
-    encoding: "utf8",
-    timeout: 5000,
-  });
-  return extractPathFromShellOutput(output) ?? undefined;
+  for (const args of LOGIN_SHELL_ARG_SETS) {
+    try {
+      const output = execFile(shell, args, {
+        encoding: "utf8",
+        timeout: 5000,
+      });
+      const resolvedPath = extractPathFromShellOutput(output) ?? undefined;
+      if (resolvedPath) {
+        return resolvedPath;
+      }
+    } catch {
+      // Try the next shell invocation mode.
+    }
+  }
+
+  return undefined;
 }
 
 export function defaultShellCandidates(): string[] {
-  return [process.env.SHELL, "/bin/zsh", "/usr/bin/zsh", "/bin/bash", "/usr/bin/bash"].filter(
-    (shell): shell is string => typeof shell === "string" && shell.trim().length > 0,
-  );
+  return [
+    process.env.SHELL,
+    "/bin/zsh",
+    "/usr/bin/zsh",
+    "/bin/bash",
+    "/usr/bin/bash",
+    "/bin/sh",
+    "/usr/bin/sh",
+  ].filter((shell): shell is string => typeof shell === "string" && shell.trim().length > 0);
 }
 
 type ShellPathResolveErrorReporter = (shell: string, error: unknown) => void;
