@@ -2,7 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
@@ -70,6 +70,10 @@ interface BuildCliInput {
   readonly arch: Option.Option<typeof BuildArch.Type>;
   readonly buildVersion: Option.Option<string>;
   readonly outputDir: Option.Option<string>;
+  readonly injectAppImageUpdateMetadata: Option.Option<boolean>;
+  readonly appImageUpdateRepository: Option.Option<string>;
+  readonly appImageUpdateInformation: Option.Option<string>;
+  readonly skipAppImageAppstreamValidation: Option.Option<boolean>;
   readonly skipBuild: Option.Option<boolean>;
   readonly keepStage: Option.Option<boolean>;
   readonly signed: Option.Option<boolean>;
@@ -158,10 +162,19 @@ interface ResolvedBuildOptions {
   readonly arch: typeof BuildArch.Type;
   readonly version: string | undefined;
   readonly outputDir: string;
+  readonly injectAppImageUpdateMetadata: boolean;
+  readonly appImageUpdateRepository: string | undefined;
+  readonly appImageUpdateInformation: string | undefined;
+  readonly skipAppImageAppstreamValidation: boolean;
   readonly skipBuild: boolean;
   readonly keepStage: boolean;
   readonly signed: boolean;
   readonly verbose: boolean;
+}
+
+interface AppImageUpdateRepository {
+  readonly owner: string;
+  readonly repository: string;
 }
 
 interface StagePackageJson {
@@ -200,10 +213,324 @@ const BuildEnvConfig = Config.all({
   arch: Config.schema(BuildArch, "T3CODE_DESKTOP_ARCH").pipe(Config.option),
   version: Config.string("T3CODE_DESKTOP_VERSION").pipe(Config.option),
   outputDir: Config.string("T3CODE_DESKTOP_OUTPUT_DIR").pipe(Config.option),
+  injectAppImageUpdateMetadata: Config.boolean(
+    "T3CODE_DESKTOP_INJECT_APPIMAGE_UPDATE_METADATA",
+  ).pipe(Config.withDefault(false)),
+  appImageUpdateRepository: Config.string("T3CODE_DESKTOP_APPIMAGE_UPDATE_REPOSITORY").pipe(
+    Config.option,
+  ),
+  appImageUpdateInformation: Config.string("T3CODE_DESKTOP_APPIMAGE_UPDATE_INFORMATION").pipe(
+    Config.option,
+  ),
+  skipAppImageAppstreamValidation: Config.boolean(
+    "T3CODE_DESKTOP_SKIP_APPIMAGE_APPSTREAM_VALIDATION",
+  ).pipe(Config.withDefault(true)),
   skipBuild: Config.boolean("T3CODE_DESKTOP_SKIP_BUILD").pipe(Config.withDefault(false)),
   keepStage: Config.boolean("T3CODE_DESKTOP_KEEP_STAGE").pipe(Config.withDefault(false)),
   signed: Config.boolean("T3CODE_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
   verbose: Config.boolean("T3CODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
+});
+
+const resolveAppImageUpdateRepository = (repository: string | undefined): AppImageUpdateRepository | undefined => {
+  if (!repository) {
+    return undefined;
+  }
+
+  const [owner, repo, ...extra] = repository.trim().split("/");
+  if (!owner || !repo || extra.length > 0) {
+    return undefined;
+  }
+
+  return { owner, repository: repo };
+};
+
+const resolveAppImageUpdateRepositoryFromRemoteUrl = (remoteUrl: string): string | undefined => {
+  const normalized = remoteUrl.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const normalizedRemote = normalized
+    .replace(/^git@github\.com:/, "https://github.com/")
+    .replace(/^ssh:\/\/git@github\.com\//, "https://github.com/");
+
+  if (!normalizedRemote.startsWith("https://github.com/") && !normalizedRemote.startsWith("http://github.com/")) {
+    return undefined;
+  }
+
+  const path = normalizedRemote
+    .replace(/^https?:\/\/(?:www\.)?github\.com\//, "")
+    .split(/[?#]/, 1)[0] ?? "";
+  const [owner, repository, ...remaining] = path
+    .replace(/\.git$/, "")
+    .split("/")
+    .filter((entry) => entry.length > 0);
+
+  if (!owner || !repository || remaining.length > 0) {
+    return undefined;
+  }
+
+  return `${owner}/${repository}`;
+};
+
+const resolveAppImageUpdateRepositoryFromGit = (repoRoot: string): string | undefined => {
+  const result = spawnSync("git", ["-C", repoRoot, "remote", "get-url", "origin"], {
+    encoding: "utf8",
+  });
+
+  if (result.status !== 0) {
+    return undefined;
+  }
+
+  return resolveAppImageUpdateRepositoryFromRemoteUrl(result.stdout);
+};
+
+const APPIMAGE_APPDATA_PATH = "apps/desktop/resources/usr/share/metainfo/t3-code-desktop.appdata.xml";
+const APPIMAGE_APPDATA_RELATIVE_TARGET = "usr/share/metainfo/t3-code-desktop.appdata.xml";
+const APPIMAGE_APPDATA_VERSION_TOKEN = "__T3CODE_APP_VERSION__";
+const APPIMAGE_APPDATA_RELEASE_DATE_TOKEN = "__T3CODE_RELEASE_DATE__";
+const LINUX_EXECUTABLE_NAME = "t3-code-desktop";
+
+export function createLinuxDesktopEntry(displayName: string): Record<string, string> {
+  return {
+    Name: displayName,
+    Icon: LINUX_EXECUTABLE_NAME,
+    StartupWMClass: LINUX_EXECUTABLE_NAME,
+  };
+}
+
+export function resolveAppImageReleaseDate(date = new Date()): string {
+  return date.toISOString().slice(0, 10);
+}
+
+export function renderAppImageAppData(
+  template: string,
+  version: string,
+  releaseDate: string,
+): string {
+  if (
+    !template.includes(APPIMAGE_APPDATA_VERSION_TOKEN) ||
+    !template.includes(APPIMAGE_APPDATA_RELEASE_DATE_TOKEN)
+  ) {
+    throw new Error("AppImage AppData template is missing required placeholders.");
+  }
+
+  const rendered = template
+    .replaceAll(APPIMAGE_APPDATA_VERSION_TOKEN, version)
+    .replaceAll(APPIMAGE_APPDATA_RELEASE_DATE_TOKEN, releaseDate);
+
+  if (
+    rendered.includes(APPIMAGE_APPDATA_VERSION_TOKEN) ||
+    rendered.includes(APPIMAGE_APPDATA_RELEASE_DATE_TOKEN)
+  ) {
+    throw new Error("Failed to replace AppImage AppData template placeholders.");
+  }
+
+  return rendered;
+}
+
+const resolveAppImageArchToken = (appImagePath: string, arch: string): string => {
+  const fileName = basename(appImagePath);
+  const appImageArchMatch = fileName.match(/-(x86_64|x64|aarch64|arm64)\.AppImage$/);
+  if (appImageArchMatch?.[1]) {
+    return appImageArchMatch[1];
+  }
+
+  return arch;
+};
+
+export const resolveAppImageUpdateInformation = (
+  appImagePath: string,
+  appImageUpdateRepository: string | undefined,
+  appImageUpdateInformation: string | undefined,
+  arch: string,
+): string | undefined => {
+  const explicit = appImageUpdateInformation?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  const repository = resolveAppImageUpdateRepository(appImageUpdateRepository);
+  if (!repository) {
+    return undefined;
+  }
+
+  const normalizedArch = resolveAppImageArchToken(appImagePath, arch);
+  const fileName = basename(appImagePath);
+  const pattern = fileName.startsWith("T3-Code-")
+    ? `T3-Code-*-${normalizedArch}.AppImage.zsync`
+    : `*-${normalizedArch}.AppImage.zsync`;
+
+  return `gh-releases-zsync|${repository.owner}|${repository.repository}|latest|${pattern}`;
+};
+
+const runCommandSync = Effect.fn("runCommandSync")(function* (
+  command: string,
+  args: readonly string[],
+  options: {
+    readonly cwd?: string;
+    readonly verbose: boolean;
+    readonly description: string;
+  },
+) {
+  const result = spawnSync(command, args, {
+    cwd: options.cwd,
+    encoding: "utf8",
+    stdio: ["ignore", options.verbose ? "inherit" : "ignore", "inherit"],
+  });
+
+  if (result.error) {
+    const error = result.error as NodeJS.ErrnoException;
+    if (error.code === "ENOENT") {
+      return yield* new BuildScriptError({
+        message: `${options.description}: command '${command}' was not found.`,
+      });
+    }
+    return yield* new BuildScriptError({
+      message: `${options.description}: ${error.message}`,
+      cause: error,
+    });
+  }
+
+  if (result.status !== 0) {
+    return yield* new BuildScriptError({
+      message: `${options.description}: command '${command}' exited with non-zero code (${result.status}).`,
+      cause: result,
+    });
+  }
+});
+
+const injectAppImageUpdateMetadata = Effect.fn("injectAppImageUpdateMetadata")(function* (
+  appImagePath: string,
+  options: {
+    readonly appImageUpdateRepository: string | undefined;
+    readonly appImageUpdateInformation: string | undefined;
+    readonly arch: typeof BuildArch.Type;
+    readonly verbose: boolean;
+    readonly appImageAppDataPath: string;
+    readonly skipAppstreamValidation: boolean;
+  },
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  const appImageUpdateInfo = resolveAppImageUpdateInformation(
+    appImagePath,
+    options.appImageUpdateRepository,
+    options.appImageUpdateInformation,
+    options.arch,
+  );
+  if (!appImageUpdateInfo) {
+    return yield* new BuildScriptError({
+      message:
+        "AppImage update injection is enabled, but no repository or explicit update information was provided.\n" +
+        "Set --appimage-update-repository, --appimage-update-information,\n" +
+        "or T3CODE_DESKTOP_APPIMAGE_UPDATE_REPOSITORY / T3CODE_DESKTOP_APPIMAGE_UPDATE_INFORMATION.",
+    });
+  }
+
+  const workDir = yield* fs.makeTempDirectoryScoped({
+    prefix: "t3code-appimage-update-",
+  });
+  const appImageExtractionPath = path.join(workDir, "squashfs-root");
+  const repackedAppImage = path.join(workDir, basename(appImagePath));
+  const repackedZsync = `${repackedAppImage}.zsync`;
+  const outputZsync = `${appImagePath}.zsync`;
+  const extractedAppDataPath = path.join(
+    appImageExtractionPath,
+    "usr",
+    "share",
+    "metainfo",
+    "t3-code-desktop.appdata.xml",
+  );
+
+  yield* runCommandSync("chmod", ["+x", appImagePath], {
+    cwd: workDir,
+    verbose: options.verbose,
+    description: `Making AppImage executable ${basename(appImagePath)}`,
+  });
+
+  yield* runCommandSync(appImagePath, ["--appimage-extract"], {
+    cwd: workDir,
+    verbose: options.verbose,
+    description: `Extracting AppImage ${basename(appImagePath)}`,
+  });
+
+  if (!(yield* fs.exists(appImageExtractionPath))) {
+    return yield* new BuildScriptError({
+      message: `AppImage extraction failed for ${appImagePath}; expected ${appImageExtractionPath}.`,
+    });
+  }
+
+  yield* fs.makeDirectory(path.dirname(extractedAppDataPath), { recursive: true });
+  if (!(yield* fs.exists(options.appImageAppDataPath))) {
+    return yield* new BuildScriptError({
+      message: `Missing AppData metadata source at ${options.appImageAppDataPath}.`,
+    });
+  }
+  yield* fs.copyFile(options.appImageAppDataPath, extractedAppDataPath);
+
+  const appImageToolArgs = ["-u", appImageUpdateInfo, appImageExtractionPath, repackedAppImage];
+  if (options.skipAppstreamValidation) {
+    appImageToolArgs.unshift("-n");
+  }
+
+  yield* runCommandSync(
+    "appimagetool",
+    appImageToolArgs,
+    {
+      cwd: workDir,
+      verbose: options.verbose,
+      description: `Repacking AppImage ${basename(appImagePath)} with update metadata`,
+    },
+  );
+
+  if (!(yield* fs.exists(repackedAppImage))) {
+    return yield* new BuildScriptError({
+      message: `Failed to rebuild AppImage for ${appImagePath}; expected ${repackedAppImage}.`,
+    });
+  }
+
+  yield* fs.remove(appImagePath).pipe(Effect.catch(() => Effect.void));
+  yield* fs.copyFile(repackedAppImage, appImagePath);
+
+  const writtenArtifacts = [appImagePath];
+  if (yield* fs.exists(repackedZsync)) {
+    yield* fs.remove(outputZsync).pipe(Effect.catch(() => Effect.void));
+    yield* fs.copyFile(repackedZsync, outputZsync);
+    writtenArtifacts.push(outputZsync);
+  }
+
+  return writtenArtifacts;
+});
+
+const writeAppImageAppData = Effect.fn("writeAppImageAppData")(function* (
+  templatePath: string,
+  targetPath: string,
+  version: string,
+  releaseDate: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  if (!(yield* fs.exists(templatePath))) {
+    return yield* new BuildScriptError({
+      message: `Missing AppData metadata template at ${templatePath}.`,
+    });
+  }
+
+  const template = yield* fs.readFileString(templatePath);
+  const rendered = yield* Effect.try({
+    try: () => renderAppImageAppData(template, version, releaseDate),
+    catch: (cause) =>
+      new BuildScriptError({
+        message: `Could not render AppData metadata from ${templatePath}.`,
+        cause,
+      }),
+  });
+
+  yield* fs.makeDirectory(path.dirname(targetPath), { recursive: true });
+  yield* fs.writeFileString(targetPath, rendered);
 });
 
 const resolveBooleanFlag = (flag: Option.Option<boolean>, envValue: boolean) =>
@@ -232,6 +559,24 @@ const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (input: B
   const arch = mergeOptions(input.arch, env.arch, getDefaultArch(platform));
   const version = mergeOptions(input.buildVersion, env.version, undefined);
   const outputDir = path.resolve(repoRoot, mergeOptions(input.outputDir, env.outputDir, "release"));
+  const injectAppImageUpdateMetadata = resolveBooleanFlag(
+    input.injectAppImageUpdateMetadata,
+    env.injectAppImageUpdateMetadata,
+  );
+  const appImageUpdateRepository = mergeOptions(
+    input.appImageUpdateRepository,
+    env.appImageUpdateRepository,
+    process.env.GITHUB_REPOSITORY?.trim() ?? resolveAppImageUpdateRepositoryFromGit(repoRoot),
+  );
+  const appImageUpdateInformation = mergeOptions(
+    input.appImageUpdateInformation,
+    env.appImageUpdateInformation,
+    undefined,
+  );
+  const skipAppImageAppstreamValidation = resolveBooleanFlag(
+    input.skipAppImageAppstreamValidation,
+    env.skipAppImageAppstreamValidation,
+  );
 
   const skipBuild = resolveBooleanFlag(input.skipBuild, env.skipBuild);
   const keepStage = resolveBooleanFlag(input.keepStage, env.keepStage);
@@ -244,6 +589,10 @@ const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (input: B
     arch,
     version,
     outputDir,
+    injectAppImageUpdateMetadata,
+    appImageUpdateRepository,
+    appImageUpdateInformation,
+    skipAppImageAppstreamValidation,
     skipBuild,
     keepStage,
     signed,
@@ -470,10 +819,23 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   }
 
   if (platform === "linux") {
-    buildConfig.linux = {
+    const linuxConfig: Record<string, unknown> = {
       target: [target],
+      executableName: LINUX_EXECUTABLE_NAME,
       icon: "icon.png",
       category: "Development",
+      desktop: {
+        entry: createLinuxDesktopEntry(productName),
+      },
+      extraFiles: [
+        {
+          from: APPIMAGE_APPDATA_PATH,
+          to: APPIMAGE_APPDATA_RELATIVE_TARGET,
+        },
+      ],
+    };
+    buildConfig.linux = {
+      ...linuxConfig,
     };
   }
 
@@ -561,6 +923,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   });
 
   const appVersion = options.version ?? serverPackageJson.version;
+  const appImageReleaseDate = resolveAppImageReleaseDate();
   const commitHash = resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
@@ -611,6 +974,16 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
   yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+
+  const stageAppImageAppDataPath = path.join(stageResourcesDir, APPIMAGE_APPDATA_RELATIVE_TARGET);
+  if (options.platform === "linux") {
+    yield* writeAppImageAppData(
+      stageAppImageAppDataPath,
+      stageAppImageAppDataPath,
+      appVersion,
+      appImageReleaseDate,
+    );
+  }
 
   yield* assertPlatformBuildResources(options.platform, stageResourcesDir, options.verbose);
 
@@ -712,6 +1085,38 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     copiedArtifacts.push(to);
   }
 
+  if (options.platform === "linux" && options.target.toLowerCase() === "appimage") {
+    if (!options.injectAppImageUpdateMetadata) {
+      yield* Effect.log("[desktop-artifact] Skipping AppImage update metadata injection.");
+    } else {
+      const appImageArtifacts = copiedArtifacts.filter((artifact) => artifact.endsWith(".AppImage"));
+      if (appImageArtifacts.length === 0) {
+        return yield* new BuildScriptError({
+          message: "AppImage metadata injection requested, but no .AppImage artifact was produced.",
+        });
+      }
+
+      const injectionResult: string[] = [];
+      for (const appImagePath of appImageArtifacts) {
+        const injectedArtifacts = yield* injectAppImageUpdateMetadata(appImagePath, {
+          appImageUpdateRepository: options.appImageUpdateRepository,
+          appImageUpdateInformation: options.appImageUpdateInformation,
+          arch: options.arch,
+          verbose: options.verbose,
+          appImageAppDataPath: stageAppImageAppDataPath,
+          skipAppstreamValidation: options.skipAppImageAppstreamValidation,
+        });
+        injectionResult.push(...injectedArtifacts);
+      }
+
+      for (const artifact of injectionResult) {
+        if (!copiedArtifacts.includes(artifact)) {
+          copiedArtifacts.push(artifact);
+        }
+      }
+    }
+  }
+
   if (copiedArtifacts.length === 0) {
     return yield* new BuildScriptError({
       message: `Build completed but no files were produced in ${stageDistDir}`,
@@ -746,6 +1151,30 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.withDescription("Output directory for artifacts (env: T3CODE_DESKTOP_OUTPUT_DIR)."),
     Flag.optional,
   ),
+  injectAppImageUpdateMetadata: Flag.boolean("inject-appimage-update-metadata").pipe(
+    Flag.withDescription(
+      "Inject AppImage update metadata with appimagetool (env: T3CODE_DESKTOP_INJECT_APPIMAGE_UPDATE_METADATA).",
+    ),
+    Flag.optional,
+  ),
+  appImageUpdateRepository: Flag.string("appimage-update-repository").pipe(
+    Flag.withDescription(
+      "Repository slug for generated AppImage update metadata, e.g. owner/repo (env: T3CODE_DESKTOP_APPIMAGE_UPDATE_REPOSITORY).",
+    ),
+    Flag.optional,
+  ),
+  appImageUpdateInformation: Flag.string("appimage-update-information").pipe(
+    Flag.withDescription(
+      "AppImage update metadata string (env: T3CODE_DESKTOP_APPIMAGE_UPDATE_INFORMATION).",
+    ),
+    Flag.optional,
+  ),
+  skipAppImageAppstreamValidation: Flag.boolean("skip-appimage-appstream-validation").pipe(
+    Flag.withDescription(
+      "Skip AppImage AppStream metadata validation when repacking with appimagetool (env: T3CODE_DESKTOP_SKIP_APPIMAGE_APPSTREAM_VALIDATION).",
+    ),
+    Flag.optional,
+  ),
   skipBuild: Flag.boolean("skip-build").pipe(
     Flag.withDescription(
       "Skip `bun run build:desktop` and use existing dist artifacts (env: T3CODE_DESKTOP_SKIP_BUILD).",
@@ -773,8 +1202,11 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
 
 const cliRuntimeLayer = Layer.mergeAll(Logger.layer([Logger.consolePretty()]), NodeServices.layer);
 
-Command.run(buildDesktopArtifactCli, { version: "0.0.0" }).pipe(
+const runtimeProgram = Command.run(buildDesktopArtifactCli, { version: "0.0.0" }).pipe(
   Effect.scoped,
   Effect.provide(cliRuntimeLayer),
-  NodeRuntime.runMain,
 );
+
+if (import.meta.main) {
+  NodeRuntime.runMain(runtimeProgram);
+}
