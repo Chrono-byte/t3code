@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.pingdotgg.t3code.desktop</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>T3 Code</name>
+  <summary>Minimal desktop GUI client for code agents and developer workflows</summary>
+  <description>
+    <p>
+      T3 Code is a minimal desktop client for interacting with coding agents from a single,
+      consistent interface.
+    </p>
+    <p>
+      It connects to supported backends and provides an opinionated workflow for running and
+      reviewing LLM-assisted changes while keeping terminal and session state local.
+    </p>
+  </description>
+  <developer id="io.github.pingdotgg">
+    <name>T3 Tools</name>
+  </developer>
+  <launchable type="desktop-id">t3-code-desktop.desktop</launchable>
+  <url type="homepage">https://github.com/pingdotgg/t3code</url>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="__T3CODE_APP_VERSION__" date="__T3CODE_RELEASE_DATE__"/>
+  </releases>
+  <provides>
+    <binary>t3-code-desktop</binary>
+  </provides>
+</component>

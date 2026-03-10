@@ -1,6 +1,8 @@
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import OS from "node:os";
+import path from "node:path";
 import readline from "node:readline";
 
 import {
@@ -1507,6 +1509,16 @@ function normalizeProviderThreadId(value: string | undefined): string | undefine
   return brandIfNonEmpty(value, (normalized) => normalized);
 }
 
+function expandHomeRelativePath(input: string): string {
+  if (input === "~") {
+    return OS.homedir();
+  }
+  if (input.startsWith("~/") || input.startsWith("~\\")) {
+    return path.join(OS.homedir(), input.slice(2));
+  }
+  return input;
+}
+
 function readCodexProviderOptions(input: CodexAppServerStartSessionInput): {
   readonly binaryPath?: string;
   readonly homePath?: string;
@@ -1516,8 +1528,8 @@ function readCodexProviderOptions(input: CodexAppServerStartSessionInput): {
     return {};
   }
   return {
-    ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}),
-    ...(options.homePath ? { homePath: options.homePath } : {}),
+    ...(options.binaryPath ? { binaryPath: expandHomeRelativePath(options.binaryPath) } : {}),
+    ...(options.homePath ? { homePath: expandHomeRelativePath(options.homePath) } : {}),
   };
 }
 

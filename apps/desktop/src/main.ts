@@ -50,6 +50,7 @@ const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
 const APP_USER_MODEL_ID = "com.t3tools.t3code";
 const USER_DATA_DIR_NAME = isDevelopment ? "t3code-dev" : "t3code";
 const LEGACY_USER_DATA_DIR_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+const APPIMAGE_ICON_BASENAME = "t3-code-desktop.png";
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
 const LOG_DIR = Path.join(STATE_DIR, "logs");
@@ -595,8 +596,80 @@ function resolveResourcePath(fileName: string): string | null {
   return null;
 }
 
+function resolveAppImageIconPath(): string | null {
+  const executablePath = Path.resolve(process.execPath);
+  const executableDir = Path.dirname(executablePath);
+  const executableBase = Path.basename(executablePath, Path.extname(executablePath));
+  const iconBaseNames = [
+    APPIMAGE_ICON_BASENAME.replace(/\.png$/, ""),
+    executableBase,
+    "t3-code-desktop",
+  ];
+  const iconSizes = ["1024x1024", "512x512", "256x256", "128x128", "64x64", "48x48", "32x32"];
+  const appImageRoots = [
+    Path.resolve(process.resourcesPath, ".."),
+    Path.resolve(process.resourcesPath),
+    executableDir,
+  ];
+
+  if (process.env.APPDIR) {
+    appImageRoots.push(Path.resolve(process.env.APPDIR));
+  }
+
+  if (process.env.APPIMAGE) {
+    appImageRoots.push(Path.resolve(process.env.APPIMAGE), Path.resolve(process.env.APPIMAGE, ".."));
+  }
+
+  const candidates: string[] = [];
+
+  for (const iconBaseName of iconBaseNames) {
+    const baseCandidates = appImageRoots.flatMap((root) => [
+      Path.join(root, `${iconBaseName}.png`),
+      Path.join(root, ".DirIcon"),
+      Path.join(root, "usr", "share", "icons", "hicolor", "1024x1024", "apps", `${iconBaseName}.png`),
+    ]);
+
+    candidates.push(...baseCandidates);
+
+    for (const iconSize of iconSizes) {
+      for (const root of appImageRoots) {
+        candidates.push(
+          Path.join(
+            root,
+            "usr",
+            "share",
+            "icons",
+            "hicolor",
+            iconSize,
+            "apps",
+            `${iconBaseName}.png`,
+          ),
+        );
+      }
+    }
+  }
+
+  const uniqueCandidates = [...new Set(candidates)];
+  for (const candidate of uniqueCandidates) {
+    if (FS.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
-  return resolveResourcePath(`icon.${ext}`);
+  const iconPath = resolveResourcePath(`icon.${ext}`);
+  if (iconPath) {
+    return iconPath;
+  }
+
+  if (process.platform === "linux") {
+    return resolveAppImageIconPath();
+  }
+
+  return null;
 }
 
 /**
