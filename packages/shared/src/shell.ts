@@ -53,16 +53,35 @@ export function readPathFromLoginShell(
   return undefined;
 }
 
-export function defaultShellCandidates(): string[] {
-  return [
+function uniqueShellCandidates(candidates: ReadonlyArray<string | undefined>): string[] {
+  const unique = new Set<string>();
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const normalized = candidate.trim();
+    if (normalized.length === 0 || unique.has(normalized)) continue;
+    unique.add(normalized);
+  }
+
+  return [...unique];
+}
+
+export function defaultShellCandidates(platform = process.platform): string[] {
+  if (platform === "linux") {
+    return uniqueShellCandidates([process.env.SHELL, "/bin/sh"]);
+  }
+
+  if (platform === "darwin") {
+    return uniqueShellCandidates([process.env.SHELL, "/bin/zsh", "/bin/bash"]);
+  }
+
+  return uniqueShellCandidates([
     process.env.SHELL,
     "/bin/zsh",
     "/usr/bin/zsh",
     "/bin/bash",
     "/usr/bin/bash",
-    "/bin/sh",
-    "/usr/bin/sh",
-  ].filter((shell): shell is string => typeof shell === "string" && shell.trim().length > 0);
+  ]);
 }
 
 type ShellPathResolveErrorReporter = (shell: string, error: unknown) => void;

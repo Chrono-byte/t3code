@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  defaultShellCandidates,
   extractPathFromShellOutput,
   readPathFromLoginShell,
   resolvePathFromLoginShells,
@@ -114,5 +115,55 @@ describe("readPathFromLoginShell", () => {
       expect(result).toBeUndefined();
       expect(execFile).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+describe("defaultShellCandidates", () => {
+  it("limits Linux candidates to the configured shell and POSIX fallback", () => {
+    const originalShell = process.env.SHELL;
+    process.env.SHELL = "/bin/bash";
+
+    try {
+      expect(defaultShellCandidates("linux")).toEqual(["/bin/bash", "/bin/sh"]);
+    } finally {
+      process.env.SHELL = originalShell;
+    }
+  });
+
+  it("dedupes repeated Linux shell candidates", () => {
+    const originalShell = process.env.SHELL;
+    process.env.SHELL = "/bin/sh";
+
+    try {
+      expect(defaultShellCandidates("linux")).toEqual(["/bin/sh"]);
+    } finally {
+      process.env.SHELL = originalShell;
+    }
+  });
+
+  it("limits macOS candidates to a small bounded fallback set", () => {
+    const originalShell = process.env.SHELL;
+    process.env.SHELL = "/opt/homebrew/bin/fish";
+
+    try {
+      expect(defaultShellCandidates("darwin")).toEqual([
+        "/opt/homebrew/bin/fish",
+        "/bin/zsh",
+        "/bin/bash",
+      ]);
+    } finally {
+      process.env.SHELL = originalShell;
+    }
+  });
+
+  it("dedupes repeated macOS shell candidates", () => {
+    const originalShell = process.env.SHELL;
+    process.env.SHELL = "/bin/zsh";
+
+    try {
+      expect(defaultShellCandidates("darwin")).toEqual(["/bin/zsh", "/bin/bash"]);
+    } finally {
+      process.env.SHELL = originalShell;
+    }
   });
 });
