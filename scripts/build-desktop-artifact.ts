@@ -3,6 +3,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
+import path from "node:path";
 
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
@@ -231,7 +232,9 @@ const BuildEnvConfig = Config.all({
   verbose: Config.boolean("T3CODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
 });
 
-const resolveAppImageUpdateRepository = (repository: string | undefined): AppImageUpdateRepository | undefined => {
+const resolveAppImageUpdateRepository = (
+  repository: string | undefined,
+): AppImageUpdateRepository | undefined => {
   if (!repository) {
     return undefined;
   }
@@ -254,13 +257,15 @@ const resolveAppImageUpdateRepositoryFromRemoteUrl = (remoteUrl: string): string
     .replace(/^git@github\.com:/, "https://github.com/")
     .replace(/^ssh:\/\/git@github\.com\//, "https://github.com/");
 
-  if (!normalizedRemote.startsWith("https://github.com/") && !normalizedRemote.startsWith("http://github.com/")) {
+  if (
+    !normalizedRemote.startsWith("https://github.com/") &&
+    !normalizedRemote.startsWith("http://github.com/")
+  ) {
     return undefined;
   }
 
-  const path = normalizedRemote
-    .replace(/^https?:\/\/(?:www\.)?github\.com\//, "")
-    .split(/[?#]/, 1)[0] ?? "";
+  const path =
+    normalizedRemote.replace(/^https?:\/\/(?:www\.)?github\.com\//, "").split(/[?#]/, 1)[0] ?? "";
   const [owner, repository, ...remaining] = path
     .replace(/\.git$/, "")
     .split("/")
@@ -285,7 +290,8 @@ const resolveAppImageUpdateRepositoryFromGit = (repoRoot: string): string | unde
   return resolveAppImageUpdateRepositoryFromRemoteUrl(result.stdout);
 };
 
-const APPIMAGE_APPDATA_PATH = "apps/desktop/resources/usr/share/metainfo/t3-code-desktop.appdata.xml";
+const APPIMAGE_APPDATA_PATH =
+  "apps/desktop/resources/usr/share/metainfo/t3-code-desktop.appdata.xml";
 const APPIMAGE_APPDATA_RELATIVE_TARGET = "usr/share/metainfo/t3-code-desktop.appdata.xml";
 const APPIMAGE_APPDATA_VERSION_TOKEN = "__T3CODE_APP_VERSION__";
 const APPIMAGE_APPDATA_RELEASE_DATE_TOKEN = "__T3CODE_RELEASE_DATE__";
@@ -475,15 +481,11 @@ const injectAppImageUpdateMetadata = Effect.fn("injectAppImageUpdateMetadata")(f
     appImageToolArgs.unshift("-n");
   }
 
-  yield* runCommandSync(
-    "appimagetool",
-    appImageToolArgs,
-    {
-      cwd: workDir,
-      verbose: options.verbose,
-      description: `Repacking AppImage ${basename(appImagePath)} with update metadata`,
-    },
-  );
+  yield* runCommandSync("appimagetool", appImageToolArgs, {
+    cwd: workDir,
+    verbose: options.verbose,
+    description: `Repacking AppImage ${basename(appImagePath)} with update metadata`,
+  });
 
   if (!(yield* fs.exists(repackedAppImage))) {
     return yield* new BuildScriptError({
@@ -1089,7 +1091,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     if (!options.injectAppImageUpdateMetadata) {
       yield* Effect.log("[desktop-artifact] Skipping AppImage update metadata injection.");
     } else {
-      const appImageArtifacts = copiedArtifacts.filter((artifact) => artifact.endsWith(".AppImage"));
+      const appImageArtifacts = copiedArtifacts.filter((artifact) =>
+        artifact.endsWith(".AppImage"),
+      );
       if (appImageArtifacts.length === 0) {
         return yield* new BuildScriptError({
           message: "AppImage metadata injection requested, but no .AppImage artifact was produced.",

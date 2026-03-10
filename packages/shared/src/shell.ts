@@ -36,3 +36,32 @@ export function readPathFromLoginShell(
   });
   return extractPathFromShellOutput(output) ?? undefined;
 }
+
+export function defaultShellCandidates(): string[] {
+  return [
+    process.env.SHELL,
+    "/bin/zsh",
+    "/usr/bin/zsh",
+    "/bin/bash",
+    "/usr/bin/bash",
+  ].filter((shell): shell is string => typeof shell === "string" && shell.trim().length > 0);
+}
+
+
+
+export function resolvePathFromLoginShells(
+  shells: ReadonlyArray<string>,
+  execFile: ExecFileSyncLike = execFileSync,
+): string | undefined {
+  for (const shell of shells) {
+    try {
+      const result = readPathFromLoginShell(shell, execFile);
+      if (result) {
+        return result;
+      }
+    } catch {
+      // Try next shell candidate.
+    }
+  }
+  return undefined;
+}

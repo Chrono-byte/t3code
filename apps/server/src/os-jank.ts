@@ -1,28 +1,15 @@
-import * as OS from "node:os";
+import OS from "node:os";
 import { Effect, Path } from "effect";
-import { readPathFromLoginShell } from "@t3tools/shared/shell";
+import { defaultShellCandidates, resolvePathFromLoginShells } from "@t3tools/shared/shell";
 
 export function fixPath(): void {
   if (process.platform === "win32") return;
 
-  const shells = [
-    process.env.SHELL,
-    "/bin/zsh",
-    "/usr/bin/zsh",
-    "/bin/bash",
-    "/usr/bin/bash",
-  ].filter((shell): shell is string => typeof shell === "string" && shell.trim().length > 0);
+  const shells = defaultShellCandidates();
 
-  for (const shell of shells) {
-    try {
-      const result = readPathFromLoginShell(shell);
-      if (result) {
-        process.env.PATH = result;
-        break;
-      }
-    } catch {
-      // Keep searching other shell candidates.
-    }
+  const resolvedPath = resolvePathFromLoginShells(shells);
+  if (resolvedPath) {
+    process.env.PATH = resolvedPath;
   }
 }
 

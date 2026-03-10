@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { extractPathFromShellOutput, readPathFromLoginShell } from "./shell";
+import {
+  extractPathFromShellOutput,
+  readPathFromLoginShell,
+  resolvePathFromLoginShells,
+} from "./shell";
 
 describe("extractPathFromShellOutput", () => {
   it("extracts the path between capture markers", () => {
@@ -53,5 +57,42 @@ describe("readPathFromLoginShell", () => {
     expect(args?.[1]).toContain("__T3CODE_PATH_START__");
     expect(args?.[1]).toContain("__T3CODE_PATH_END__");
     expect(options).toEqual({ encoding: "utf8", timeout: 5000 });
+  });
+
+  describe("resolvePathFromLoginShells", () => {
+    it("returns the first resolved PATH from the provided shells", () => {
+      const execFile = vi.fn<
+        (
+          file: string,
+          args: ReadonlyArray<string>,
+          options: { encoding: "utf8"; timeout: number },
+        ) => string
+      >((file) => {
+        if (file === "/bin/zsh") {
+          throw new Error("zsh unavailable");
+        }
+        return "__T3CODE_PATH_START__\n/a:/b\n__T3CODE_PATH_END__\n";
+      });
+
+      const result = resolvePathFromLoginShells(["/bin/zsh", "/bin/bash"], execFile);
+      expect(result).toBe("/a:/b");
+      expect(execFile).toHaveBeenCalledTimes(2);
+    });
+
+    it("returns undefined when all shells fail to resolve PATH", () => {
+      const execFile = vi.fn<
+        (
+          file: string,
+          args: ReadonlyArray<string>,
+          options: { encoding: "utf8"; timeout: number },
+        ) => string
+      >(() => {
+        throw new Error("no shells available");
+      });
+
+      const result = resolvePathFromLoginShells(["/bin/zsh", "/bin/bash"], execFile);
+      expect(result).toBeUndefined();
+      expect(execFile).toHaveBeenCalledTimes(2);
+    });
   });
 });

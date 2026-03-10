@@ -617,7 +617,10 @@ function resolveAppImageIconPath(): string | null {
   }
 
   if (process.env.APPIMAGE) {
-    appImageRoots.push(Path.resolve(process.env.APPIMAGE), Path.resolve(process.env.APPIMAGE, ".."));
+    appImageRoots.push(
+      Path.resolve(process.env.APPIMAGE),
+      Path.resolve(process.env.APPIMAGE, ".."),
+    );
   }
 
   const candidates: string[] = [];
@@ -626,7 +629,16 @@ function resolveAppImageIconPath(): string | null {
     const baseCandidates = appImageRoots.flatMap((root) => [
       Path.join(root, `${iconBaseName}.png`),
       Path.join(root, ".DirIcon"),
-      Path.join(root, "usr", "share", "icons", "hicolor", "1024x1024", "apps", `${iconBaseName}.png`),
+      Path.join(
+        root,
+        "usr",
+        "share",
+        "icons",
+        "hicolor",
+        "1024x1024",
+        "apps",
+        `${iconBaseName}.png`,
+      ),
     ]);
 
     candidates.push(...baseCandidates);
