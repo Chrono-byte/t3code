@@ -1,7 +1,7 @@
 import { defaultShellCandidates, resolvePathFromLoginShells } from "@t3tools/shared/shell";
 
 export function fixPath(): void {
-  if (process.platform === "win32") return;
+  if (process.platform !== "darwin" && process.platform !== "linux") return;
 
   const result = resolvePathFromLoginShells(defaultShellCandidates());
   if (result) {
