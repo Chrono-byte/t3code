@@ -289,6 +289,15 @@ const APPIMAGE_APPDATA_PATH = "apps/desktop/resources/usr/share/metainfo/t3-code
 const APPIMAGE_APPDATA_RELATIVE_TARGET = "usr/share/metainfo/t3-code-desktop.appdata.xml";
 const APPIMAGE_APPDATA_VERSION_TOKEN = "__T3CODE_APP_VERSION__";
 const APPIMAGE_APPDATA_RELEASE_DATE_TOKEN = "__T3CODE_RELEASE_DATE__";
+const LINUX_EXECUTABLE_NAME = "t3-code-desktop";
+
+export function createLinuxDesktopEntry(displayName: string): Record<string, string> {
+  return {
+    Name: displayName,
+    Icon: LINUX_EXECUTABLE_NAME,
+    StartupWMClass: LINUX_EXECUTABLE_NAME,
+  };
+}
 
 export function resolveAppImageReleaseDate(date = new Date()): string {
   return date.toISOString().slice(0, 10);
@@ -324,17 +333,13 @@ const resolveAppImageArchToken = (appImagePath: string, arch: string): string =>
   const fileName = basename(appImagePath);
   const appImageArchMatch = fileName.match(/-(x86_64|x64|aarch64|arm64)\.AppImage$/);
   if (appImageArchMatch?.[1]) {
-    const token = appImageArchMatch[1];
-    if (token === "x64") {
-      return "x86_64";
-    }
-    return token;
+    return appImageArchMatch[1];
   }
 
-  return arch === "x64" ? "x86_64" : arch;
+  return arch;
 };
 
-const resolveAppImageUpdateInformation = (
+export const resolveAppImageUpdateInformation = (
   appImagePath: string,
   appImageUpdateRepository: string | undefined,
   appImageUpdateInformation: string | undefined,
@@ -816,8 +821,12 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "linux") {
     const linuxConfig: Record<string, unknown> = {
       target: [target],
+      executableName: LINUX_EXECUTABLE_NAME,
       icon: "icon.png",
       category: "Development",
+      desktop: {
+        entry: createLinuxDesktopEntry(productName),
+      },
       extraFiles: [
         {
           from: APPIMAGE_APPDATA_PATH,
