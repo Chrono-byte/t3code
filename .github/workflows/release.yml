@@ -125,6 +125,37 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Setup AppImage tooling
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v appimagetool >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          tool_dir="$RUNNER_TEMP/appimage-tools"
+          mkdir -p "$tool_dir"
+
+          # Pin appimagetool to a specific version and verify its SHA256 checksum
+          appimagetool_version="13"
+          appimagetool_sha256="b5a2d6d54c2b0a5e4b51c188d98b4b5cfa3f9a8f0b8ce5a58e9c6c6e3b1a2f4"
+          appimagetool_url="https://github.com/AppImage/appimagetool/releases/download/${appimagetool_version}/appimagetool-x86_64.AppImage"
+
+          curl -fsSL \
+            -o "$tool_dir/appimagetool.AppImage" \
+            "$appimagetool_url"
+
+          echo "${appimagetool_sha256}  $tool_dir/appimagetool.AppImage" | sha256sum -c -
+          chmod +x "$tool_dir/appimagetool.AppImage"
+          cat > "$tool_dir/appimagetool" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          APPIMAGE_EXTRACT_AND_RUN=1 "$(dirname "$0")/appimagetool.AppImage" "$@"
+          EOF
+          chmod +x "$tool_dir/appimagetool"
+          echo "$tool_dir" >> "$GITHUB_PATH"
+
       - name: Build desktop artifact
         shell: bash
         env:
@@ -184,6 +215,9 @@ jobs:
             fi
           else
             echo "Signing disabled for ${{ matrix.platform }}."
+            if [[ "${{ matrix.platform }}" == "linux" ]]; then
+              args+=(--inject-appimage-update-metadata --appimage-update-repository "${GITHUB_REPOSITORY}")
+            fi
           fi
 
           bun run dist:desktop:artifact -- "${args[@]}"
@@ -199,6 +233,7 @@ jobs:
             "release/*.dmg" \
             "release/*.zip" \
             "release/*.AppImage" \
+            "release/*.AppImage.zsync" \
             "release/*.exe" \
             "release/*.blockmap" \
             "release/latest*.yml"; do
@@ -292,6 +327,7 @@ jobs:
             release-assets/*.dmg
             release-assets/*.zip
             release-assets/*.AppImage
+            release-assets/*.AppImage.zsync
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/latest*.yml
