@@ -631,7 +631,6 @@ function resolveAppImageIconPath(): string | null {
   }
 
   if (process.env.APPIMAGE) {
-    pushRoot(Path.resolve(process.env.APPIMAGE));
     pushRoot(Path.resolve(process.env.APPIMAGE, ".."));
   }
 
