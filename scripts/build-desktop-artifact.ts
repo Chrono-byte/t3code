@@ -470,9 +470,9 @@ const injectAppImageUpdateMetadata = Effect.fn("injectAppImageUpdateMetadata")(f
   }
   yield* fs.copyFile(options.appImageAppDataPath, extractedAppDataPath);
 
-  const appImageToolArgs = ["-u", appImageUpdateInfo, appImageExtractionPath, repackedAppImage];
-  if (options.skipAppstreamValidation) {
-    appImageToolArgs.unshift("-n");
+  const appImageToolArgs = ["-n", "-u", appImageUpdateInfo, appImageExtractionPath, repackedAppImage];
+  if (!options.skipAppstreamValidation) {
+    yield* validateAppImageAppData(extractedAppDataPath, options.verbose);
   }
 
   yield* runCommandSync(
@@ -502,6 +502,20 @@ const injectAppImageUpdateMetadata = Effect.fn("injectAppImageUpdateMetadata")(f
   }
 
   return writtenArtifacts;
+});
+
+const validateAppImageAppData = Effect.fn("validateAppImageAppData")(function* (
+  appDataPath: string,
+  verbose: boolean,
+) {
+  yield* runCommandSync(
+    "appstreamcli",
+    ["validate", "--no-net", "--strict", appDataPath],
+    {
+      verbose,
+      description: `Validating AppData metadata ${basename(appDataPath)}`,
+    },
+  );
 });
 
 const writeAppImageAppData = Effect.fn("writeAppImageAppData")(function* (
