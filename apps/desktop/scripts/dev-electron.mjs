@@ -26,6 +26,7 @@ await waitOn({
 
 const childEnv = { ...process.env };
 delete childEnv.ELECTRON_RUN_AS_NODE;
+const linuxClassArg = process.platform === "linux" ? ["--class=t3code-dev"] : [];
 
 let shuttingDown = false;
 let restartTimer = null;
@@ -57,7 +58,7 @@ function startApp() {
 
   const app = spawn(
     resolveElectronPath(),
-    [`--t3code-dev-root=${desktopDir}`, "dist-electron/main.js"],
+    [...linuxClassArg, `--t3code-dev-root=${desktopDir}`, "dist-electron/main.js"],
     {
       cwd: desktopDir,
       env: {
