@@ -875,6 +875,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   // Preserve staged desktop resources for packaged Linux builds, including AppImage and RPM.
   yield* fs.copy(stageResourcesDir, path.join(stageAppDir, "apps/desktop/prod-resources"));
+  const stageBunTmpDir = path.join(stageRoot, ".bun-tmp");
+  const stageBunInstallDir = path.join(stageRoot, ".bun-install");
+  yield* fs.makeDirectory(stageBunTmpDir, { recursive: true });
+  yield* fs.makeDirectory(stageBunInstallDir, { recursive: true });
 
   const stagePackageJson: StagePackageJson = {
     name: "t3code",
@@ -911,6 +915,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* runCommand(
     ChildProcess.make({
       cwd: stageAppDir,
+      env: {
+        ...process.env,
+        BUN_TMPDIR: stageBunTmpDir,
+        BUN_INSTALL: stageBunInstallDir,
+      },
       ...commandOutputOptions(options.verbose),
       // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
       shell: process.platform === "win32",
