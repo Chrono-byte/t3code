@@ -229,16 +229,6 @@ interface StagePackageJson {
   readonly overrides: Record<string, unknown>;
 }
 
-const PROJECT_HOMEPAGE =
-  typeof serverPackageJson.repository === "object" &&
-  typeof serverPackageJson.repository?.url === "string"
-    ? serverPackageJson.repository.url
-    : "https://github.com/pingdotgg/t3code";
-const PROJECT_AUTHOR = {
-  name: "T3 Tools",
-  email: "t3code@users.noreply.github.com",
-} as const;
-
 const AzureTrustedSigningOptionsConfig = Config.all({
   publisherName: Config.string("AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"),
   endpoint: Config.string("AZURE_TRUSTED_SIGNING_ENDPOINT"),
@@ -810,9 +800,12 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     t3codeCommitHash: commitHash,
     private: true,
     description: "T3 Code desktop build",
-    homepage: PROJECT_HOMEPAGE,
-    author: PROJECT_AUTHOR,
-    main: "apps/desktop/dist-electron/main.cjs",
+    homepage: "https://t3.codes",
+    author: {
+      name: "T3 Tools",
+      email: "t3code@users.noreply.github.com",
+    },
+    main: "apps/desktop/dist-electron/main.js",
     build: yield* createBuildConfig(
       options.platform,
       options.target,
