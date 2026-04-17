@@ -10,7 +10,7 @@ This document covers the unified release workflow for stable and nightly desktop
   - scheduled nightly at `09:00 UTC`
   - manual `workflow_dispatch` for either channel
 - Runs quality gates first: lint, typecheck, test.
-- Builds five artifacts in parallel for both channels:
+- Builds four artifacts in parallel for both channels:
   - macOS `arm64` DMG
   - macOS `x64` DMG
   - Linux `x64` AppImage

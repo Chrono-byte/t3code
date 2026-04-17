@@ -788,10 +788,6 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   // electron-builder is filtering out stageResourcesDir directory in the AppImage for production
   yield* fs.copy(stageResourcesDir, path.join(stageAppDir, "apps/desktop/prod-resources"));
-  const stageBunTmpDir = path.join(stageRoot, ".bun-tmp");
-  const stageBunInstallDir = path.join(stageRoot, ".bun-install");
-  yield* fs.makeDirectory(stageBunTmpDir, { recursive: true });
-  yield* fs.makeDirectory(stageBunInstallDir, { recursive: true });
 
   const stagePackageJson: StagePackageJson = {
     name: "t3code",
@@ -800,12 +796,12 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     t3codeCommitHash: commitHash,
     private: true,
     description: "T3 Code desktop build",
+    main: "apps/desktop/dist-electron/main.cjs",
     homepage: "https://t3.codes",
     author: {
       name: "T3 Tools",
       email: "t3code@users.noreply.github.com",
     },
-    main: "apps/desktop/dist-electron/main.js",
     build: yield* createBuildConfig(
       options.platform,
       options.target,
@@ -831,11 +827,6 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* runCommand(
     ChildProcess.make({
       cwd: stageAppDir,
-      env: {
-        ...process.env,
-        BUN_TMPDIR: stageBunTmpDir,
-        BUN_INSTALL: stageBunInstallDir,
-      },
       ...commandOutputOptions(options.verbose),
       // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
       shell: process.platform === "win32",
